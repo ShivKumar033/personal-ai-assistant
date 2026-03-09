@@ -30,11 +30,14 @@ from config import Settings, PROJECT_ROOT
 from core.context_manager import ContextManager
 from core.state_manager import StateManager, JarvisStatus
 from core.event_engine import EventEngine
+from core.command_interpreter import CommandInterpreter
 from security import PermissionEngine
 from tools.tool_registry import ToolRegistry
 from tools.tool_executor import ToolExecutor
 from tools.builtin_tools import register_builtin_tools
 from modules.speech.text_input import TextInput
+from ai.brain import AIBrain
+from ai.model_router import ModelRouter
 
 
 # ── Rich Console ──────────────────────────────────────────
@@ -46,9 +49,10 @@ class Assistant:
     Main JARVIS controller.
 
     Orchestrates:
-    - Text input processing
-    - Built-in command handling
+    - Natural language understanding via AI Brain
+    - Command interpretation (keyword + AI)
     - Tool execution
+    - Conversational responses
     - State & context management
     - Event emission
     - Security enforcement
@@ -73,6 +77,14 @@ class Assistant:
             history_file=str(settings.history_path),
         )
 
+        # ── AI subsystems ─────────────────────────────
+        self._model_router = ModelRouter(settings.ai)
+        self._brain = AIBrain(settings.ai, self._model_router)
+        self._interpreter = CommandInterpreter(
+            brain=self._brain,
+            registry=self._registry,
+        )
+
         # Register built-in tools
         register_builtin_tools(self._registry)
 
@@ -84,6 +96,30 @@ class Assistant:
         """Start the JARVIS assistant main loop."""
         self._running = True
         self._state.status = JarvisStatus.IDLE
+
+        # ── Initialize AI Brain ───────────────────────
+        console.print(
+            "\n[dim]  ⏳ Initializing AI Brain...[/dim]", end=""
+        )
+        await self._brain.initialize()
+
+        # Update model router with backend availability
+        backend_status = {
+            name: backend.is_available
+            for name, backend in self._brain._backends.items()
+        }
+        self._model_router.update_availability(backend_status)
+
+        if self._brain.is_online:
+            console.print(
+                f"[green] ✓ Online[/green] "
+                f"[dim]({self._brain.active_model})[/dim]"
+            )
+        else:
+            console.print(
+                "[yellow] ⚠ Offline mode[/yellow] "
+                "[dim](start Ollama or set OpenAI key)[/dim]"
+            )
 
         # Print boot banner
         self._print_banner()
@@ -133,6 +169,9 @@ class Assistant:
         self._running = False
         self._state.status = JarvisStatus.SHUTTING_DOWN
 
+        # Close AI Brain
+        await self._brain.close()
+
         console.print()
         console.print(
             Panel(
@@ -152,10 +191,11 @@ class Assistant:
         """
         Process a user command and return a response.
 
-        Routes to:
-        1. Built-in commands (help, status, tools, etc.)
-        2. Tool execution (if a matching tool is found)
-        3. Echo-back (Phase 1 — no AI brain yet)
+        Pipeline:
+        1. Check for built-in commands (help, status, etc.)
+        2. Run through CommandInterpreter (direct → keyword → AI)
+        3. Execute tool if one was matched
+        4. Return conversational response if no tool
         """
         command = user_input.strip().lower()
 
@@ -173,68 +213,108 @@ class Assistant:
             return None
         elif command == "version":
             return self._handle_version()
+        elif command == "brain":
+            return self._handle_brain_status()
 
-        # ── Direct tool invocation ────────────────────
-        # Try to match "tool_name" or "tool_name arg1 arg2"
-        parts = user_input.strip().split(maxsplit=1)
-        tool_name = parts[0].lower().replace("-", "_")
+        # ── Interpret the command ─────────────────────
+        intent = await self._interpreter.interpret(user_input)
 
-        if self._registry.exists(tool_name):
+        logger.info(
+            f"Intent: {intent.intent} | tool={intent.tool_name} | "
+            f"confidence={intent.confidence:.2f} | source={intent.source}"
+        )
+
+        # ── Execute tool if matched ───────────────────
+        if intent.tool_name and not intent.is_conversational:
             self._state.status = JarvisStatus.EXECUTING
 
-            # Parse simple args (Phase 1 — basic parsing)
-            params = {}
-            if len(parts) > 1:
-                # Try JSON first
-                try:
-                    params = json.loads(parts[1])
-                except (json.JSONDecodeError, ValueError):
-                    # Fall back to first arg as filter/query
-                    tool_def = self._registry.get(tool_name)
-                    if tool_def and tool_def.parameters:
-                        first_param = list(tool_def.parameters.keys())[0]
-                        params = {first_param: parts[1]}
+            result = await self._executor.execute(
+                intent.tool_name,
+                intent.tool_params,
+            )
 
-            result = await self._executor.execute(tool_name, params)
+            # Build response
+            if result.success:
+                response_text = self._format_tool_output(
+                    intent.tool_name, result.output
+                )
+                # If AI provided a response, prefix it
+                if intent.response_text and intent.source == "ai":
+                    response_text = (
+                        f"  {intent.response_text}\n\n{response_text}"
+                    )
+            else:
+                response_text = f"❌ {result.error}"
+                if intent.response_text:
+                    response_text = (
+                        f"  {intent.response_text}\n\n  {response_text}"
+                    )
 
             # Log to context & state
             self._context.add_exchange(
                 user_input,
                 str(result.output) if result.success else str(result.error),
-                intent=tool_name,
+                intent=intent.intent,
+                entities=intent.entities,
                 success=result.success,
             )
             self._state.log_command(
-                user_input,
-                str(result),
-                result.success,
+                user_input, str(result), result.success
             )
             self._state.status = JarvisStatus.IDLE
+            return response_text
 
-            if result.success:
-                return self._format_tool_output(tool_name, result.output)
-            else:
-                return f"❌ {result.error}"
+        # ── Conversational response ───────────────────
+        if intent.response_text:
+            # AI already generated a response
+            self._context.add_exchange(
+                user_input,
+                intent.response_text,
+                intent=intent.intent,
+                entities=intent.entities,
+                success=True,
+            )
+            self._state.log_command(user_input, "responded", True)
+            self._state.status = JarvisStatus.IDLE
 
-        # ── No AI brain yet (Phase 1) ────────────────
-        # In Phase 2, this will route to the AI Brain
+            model_tag = ""
+            if intent.model_used:
+                model_tag = f"\n\n  [dim]— {intent.model_used}[/dim]"
+            return f"  {intent.response_text}{model_tag}"
+
+        # ── AI Brain conversational fallback ──────────
+        if self._brain.is_online:
+            self._state.status = JarvisStatus.THINKING
+            context_str = self._context.build_prompt_context(max_exchanges=5)
+            response = await self._brain.respond(user_input, context=context_str)
+
+            self._context.add_exchange(
+                user_input, response,
+                intent="conversation",
+                success=True,
+            )
+            self._state.log_command(user_input, "ai_response", True)
+            self._state.status = JarvisStatus.IDLE
+
+            return (
+                f"  {response}\n\n"
+                f"  [dim]— {self._brain.active_model}[/dim]"
+            )
+
+        # ── Fully offline fallback ────────────────────
         self._context.add_exchange(
             user_input,
-            "(AI Brain not yet connected — coming in Phase 2)",
+            "(offline)",
             intent="unknown",
             success=True,
         )
-        self._state.log_command(user_input, "echoed", True)
+        self._state.log_command(user_input, "offline", True)
         self._state.status = JarvisStatus.IDLE
 
         return (
-            f"🧠 I understood: \"{user_input}\"\n"
-            f"\n"
-            f"   [Phase 1] AI Brain is not yet connected.\n"
-            f"   I can execute built-in tools — type [bold]tools[/bold] to see them,\n"
-            f"   or type [bold]help[/bold] for all commands.\n"
-            f"\n"
-            f"   💡 AI understanding arrives in Phase 2!"
+            f"🧠 I understood: \"{user_input}\"\n\n"
+            f"   No AI model is connected. Start Ollama or configure OpenAI.\n"
+            f"   I can still execute built-in tools — type [bold]tools[/bold] to see them."
         )
 
     # ── Built-in Command Handlers ─────────────────────────
@@ -246,10 +326,11 @@ class Assistant:
     def _handle_version(self) -> str:
         """Return version info."""
         s = self._settings.jarvis
+        brain_status = "🟢 Online" if self._brain.is_online else "🔴 Offline"
         return (
             f"  🤖 {s.name} v{s.version} (codename: {s.codename})\n"
             f"  📦 Platform: {self._settings.resolve_platform()}\n"
-            f"  🧠 AI Model: {self._settings.ai.default_model}\n"
+            f"  🧠 AI Brain: {brain_status} ({self._brain.active_model})\n"
             f"  🔒 Security: {'Enabled' if self._settings.security.confirmation_required else 'Relaxed'}"
         )
 
@@ -258,6 +339,13 @@ class Assistant:
         state = self._state.summary()
         res = state["resources"]
         sys_info = state["system"]
+        brain = self._brain.status()
+
+        brain_icon = "🟢" if brain["online"] else "🔴"
+        backends_str = ""
+        for name, info in brain.get("backends", {}).items():
+            icon = "✅" if info["available"] else "❌"
+            backends_str += f"\n               {icon} {name}: {info['model']}"
 
         lines = [
             f"  📊 JARVIS Status Dashboard",
@@ -270,7 +358,39 @@ class Assistant:
             f"  Active Tasks:{state['active_tasks']}",
             f"  Commands Run:{state['total_commands']}",
             f"  Tools:       {self._registry.count} registered",
+            f"  {'─' * 40}",
+            f"  {brain_icon} AI Brain: {brain['active_model']}{backends_str}",
         ]
+        return "\n".join(lines)
+
+    def _handle_brain_status(self) -> str:
+        """Return detailed AI Brain status."""
+        brain = self._brain.status()
+
+        lines = [
+            f"  🧠 AI Brain Status",
+            f"  {'─' * 40}",
+            f"  Online:      {'Yes' if brain['online'] else 'No'}",
+            f"  Active:      {brain['active_model']}",
+            f"  Initialized: {'Yes' if brain['initialized'] else 'No'}",
+            f"  ",
+            f"  Backends:",
+        ]
+
+        for name, info in brain.get("backends", {}).items():
+            icon = "✅" if info["available"] else "❌"
+            lines.append(f"    {icon} {name}: {info['model']}")
+
+        lines.extend([
+            f"  ",
+            f"  Routing Rules:",
+        ])
+        for rule in self._model_router.get_rules():
+            lines.append(
+                f"    {rule['task_type']:<20} → {rule['preferred']} "
+                f"(fallback: {rule['fallback']})"
+            )
+
         return "\n".join(lines)
 
     def _handle_tools(self) -> str:
@@ -295,7 +415,7 @@ class Assistant:
                 lines.append(f"    {risk_icon} {t.name:<20} — {t.description}")
             lines.append("")
 
-        lines.append("  Usage: type the tool name directly (e.g., 'system_info')")
+        lines.append("  Usage: type the tool name, or describe what you want naturally.")
         return "\n".join(lines)
 
     def _handle_history(self) -> str:
@@ -323,7 +443,6 @@ class Assistant:
             if not output:
                 return f"  ✅ {tool_name}: (empty result)"
             if isinstance(output[0], dict):
-                # Format as table-like output
                 lines = [f"  ✅ {tool_name} ({len(output)} results):"]
                 for i, item in enumerate(output[:15], 1):
                     lines.append(f"    {i}. {self._dict_to_str_compact(item)}")
@@ -380,6 +499,11 @@ class Assistant:
 
         s = self._settings.jarvis
         sys_info = self._state.system_info
+        brain_status = (
+            f"[green]Online[/green] ({self._brain.active_model})"
+            if self._brain.is_online
+            else "[yellow]Offline[/yellow]"
+        )
 
         info_lines = (
             f"[bold cyan]{s.name}[/bold cyan] v{s.version} "
@@ -388,8 +512,9 @@ class Assistant:
             f"Python {sys_info.python_version} | "
             f"{sys_info.cpu_count} cores | "
             f"{sys_info.total_memory_gb} GB RAM[/dim]\n\n"
+            f"[bright_cyan]🧠 AI Brain:[/bright_cyan] {brain_status} | "
             f"[bright_cyan]🔒 Security:[/bright_cyan] "
-            f"{'Active' if s else 'Relaxed'} | "
+            f"{'Active' if self._settings.security.confirmation_required else 'Relaxed'} | "
             f"[bright_cyan]🧰 Tools:[/bright_cyan] "
             f"{self._registry.count} loaded\n\n"
             f"[dim]Type [bold]help[/bold] for commands, "
