@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "jarvis-ai"
+version = "1.0.0"
+description = "JARVIS AI — Autonomous Desktop AI Assistant"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Shiv"}
+]
+
+dependencies = [
+    # Config & Validation
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.2.0",
+    "pyyaml>=6.0",
+
+    # Logging
+    "loguru>=0.7.0",
+
+    # Terminal UI
+    "rich>=13.7.0",
+    "prompt-toolkit>=3.0.0",
+
+    # System
+    "psutil>=5.9.0",
+
+    # Async
+    "asyncio-extra>=1.0.0; python_version<'3.12'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=5.0.0",
+]
+
+[project.scripts]
+jarvis = "main:cli_entry"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

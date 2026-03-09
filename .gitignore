@@ -1,0 +1,39 @@
+# JARVIS AI
+# ===========
+# Autonomous Desktop AI Assistant
+
+# Dependencies
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs (keep directory, ignore log files)
+logs/*.log
+logs/.jarvis_history
+
+# Config secrets
+config/secrets.yaml
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/

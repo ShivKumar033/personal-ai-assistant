@@ -1,0 +1,79 @@
+# ============================================
+# JARVIS AI — Master Configuration
+# ============================================
+# Override any value with environment variables:
+#   JARVIS_AI__DEFAULT_MODEL=gpt-4o
+#   JARVIS_SECURITY__CONFIRMATION_REQUIRED=false
+
+jarvis:
+  name: "JARVIS"
+  version: "1.0.0"
+  codename: "Friday"
+  platform: "auto"            # auto | linux | windows
+  debug: false
+
+# --- AI / LLM Configuration ---
+ai:
+  default_model: "ollama/llama3"
+  fallback_model: "ollama/mistral"
+  openai_api_key: ""          # Set via env: JARVIS_AI__OPENAI_API_KEY
+  ollama_host: "http://localhost:11434"
+  temperature: 0.7
+  max_tokens: 2048
+  timeout_seconds: 30
+
+# --- Security & Permissions ---
+security:
+  confirmation_required: true
+  max_retries: 3
+  blocked_commands:
+    - "rm -rf /"
+    - "rm -rf /*"
+    - "mkfs"
+    - "dd if=/dev/zero"
+    - "format c:"
+    - "del /s /q c:\\"
+    - ":(){:|:&};:"
+  safe_commands:
+    - "ls"
+    - "pwd"
+    - "whoami"
+    - "date"
+    - "echo"
+    - "cat"
+    - "head"
+    - "tail"
+  risk_levels:
+    file_delete: "confirm"
+    file_create: "safe"
+    file_move: "confirm"
+    app_open: "safe"
+    app_close: "confirm"
+    system_settings: "confirm"
+    network_request: "safe"
+    shell_execute: "confirm"
+    system: "safe"
+    info: "safe"
+    general: "safe"
+
+# --- Logging ---
+logging:
+  level: "INFO"                # DEBUG | INFO | WARNING | ERROR | CRITICAL
+  file: "logs/jarvis.log"
+  rotation: "10 MB"
+  retention: "7 days"
+  format: "{time:YYYY-MM-DD HH:mm:ss} | {level:<8} | {name}:{function}:{line} | {message}"
+  colorize: true
+
+# --- Input ---
+input:
+  mode: "text"                 # text | voice | both
+  history_file: "logs/.jarvis_history"
+  max_history: 1000
+
+# --- Resource Limits ---
+resources:
+  max_cpu_percent: 80
+  max_memory_percent: 85
+  max_concurrent_tasks: 5
+  task_timeout_seconds: 300
