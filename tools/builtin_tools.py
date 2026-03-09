@@ -23,6 +23,12 @@ from loguru import logger
 def register_builtin_tools(registry) -> None:
     """Register all built-in tools with the provided ToolRegistry."""
 
+    # ── Phase 3: Import tool registration modules ─────
+    from tools.system_control import register_system_tools
+    from tools.file_manager import register_file_tools
+    from modules.automation import register_automation_tools
+
+
     # ── System Info ───────────────────────────────────────
 
     @registry.register(
@@ -220,4 +226,12 @@ def register_builtin_tools(registry) -> None:
             f"Uptime: {days}d {hours}h {minutes}m"
         )
 
-    logger.info(f"Registered {registry.count} built-in tools")
+    logger.info(f"Registered {registry.count} Phase 1 tools")
+
+    # ── Phase 3: OS Control, File Management, Automation ──
+    register_system_tools(registry)
+    register_file_tools(registry)
+    register_automation_tools(registry)
+
+    logger.info(f"All tools registered — total: {registry.count}")
+

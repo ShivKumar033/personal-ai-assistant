@@ -55,6 +55,9 @@ security:
     system: "safe"
     info: "safe"
     general: "safe"
+    file: "safe"
+    automation: "safe"
+    web: "safe"
 
 # --- Logging ---
 logging:

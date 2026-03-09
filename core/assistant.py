@@ -38,6 +38,9 @@ from tools.builtin_tools import register_builtin_tools
 from modules.speech.text_input import TextInput
 from ai.brain import AIBrain
 from ai.model_router import ModelRouter
+from ai.planner import AgentPlanner
+from ai.agent_executor import WorkflowRunner
+from core.task_orchestrator import TaskOrchestrator
 
 
 # ── Rich Console ──────────────────────────────────────────
@@ -84,6 +87,9 @@ class Assistant:
             brain=self._brain,
             registry=self._registry,
         )
+        self._planner = AgentPlanner(self._brain, self._registry)
+        self._workflow_runner = WorkflowRunner(self._brain, self._executor, self._state, self._planner)
+        self._orchestrator = TaskOrchestrator(self._workflow_runner)
 
         # Register built-in tools
         register_builtin_tools(self._registry)
@@ -127,6 +133,9 @@ class Assistant:
         # Emit boot event
         await self._events.emit("jarvis_started")
 
+        # Start Task Orchestrator
+        await self._orchestrator.start()
+
         # Main REPL loop
         while self._running:
             try:
@@ -169,7 +178,8 @@ class Assistant:
         self._running = False
         self._state.status = JarvisStatus.SHUTTING_DOWN
 
-        # Close AI Brain
+        # Close subsystems
+        await self._orchestrator.stop()
         await self._brain.close()
 
         console.print()
@@ -215,6 +225,10 @@ class Assistant:
             return self._handle_version()
         elif command == "brain":
             return self._handle_brain_status()
+        elif command.startswith("plan "):
+            task = user_input[5:].strip()
+            task_id = self._orchestrator.enqueue(task)
+            return f"✅ Queued autonomous workflow: '{task}' (ID: {task_id})"
 
         # ── Interpret the command ─────────────────────
         intent = await self._interpreter.interpret(user_input)
