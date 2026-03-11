@@ -1,6 +1,5 @@
 """
 JARVIS AI — Base Agent (Phase 4)
-
 Interface for all specialized agents in the Multi-Agent System.
 """
 
