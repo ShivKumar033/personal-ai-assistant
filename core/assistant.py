@@ -27,7 +27,7 @@ from rich.text import Text
 from rich import box
 
 from config import Settings, PROJECT_ROOT
-from core.context_manager import ContextManager
+from memory.memory_manager import MemoryManager
 from core.state_manager import StateManager, JarvisStatus
 from core.event_engine import EventEngine
 from core.command_interpreter import CommandInterpreter
@@ -35,6 +35,7 @@ from security import PermissionEngine
 from tools.tool_registry import ToolRegistry
 from tools.tool_executor import ToolExecutor
 from tools.builtin_tools import register_builtin_tools
+from tools.memory_tools import register_memory_tools
 from modules.speech.text_input import TextInput
 from ai.brain import AIBrain
 from ai.model_router import ModelRouter
@@ -71,7 +72,8 @@ class Assistant:
 
         # ── Initialize subsystems ─────────────────────
         self._state = StateManager()
-        self._context = ContextManager(max_history=50)
+        self._memory = MemoryManager(storage_dir=str(settings.history_path.parent / "memory"))
+        self._context = self._memory.short_term
         self._events = EventEngine()
         self._permission = PermissionEngine(settings.security)
         self._registry = ToolRegistry()
@@ -121,6 +123,7 @@ class Assistant:
 
         # Register built-in tools
         register_builtin_tools(self._registry)
+        register_memory_tools(self._registry, self._memory)
 
         logger.info("Assistant subsystems initialized")
 
@@ -136,6 +139,11 @@ class Assistant:
             "\n[dim]  ⏳ Initializing AI Brain...[/dim]", end=""
         )
         await self._brain.initialize()
+
+        console.print(
+            "\n[dim]  ⏳ Initializing Memory Subsystem...[/dim]", end=""
+        )
+        await self._memory.initialize()
 
         # Update model router with backend availability
         backend_status = {
@@ -215,6 +223,7 @@ class Assistant:
             await self._audio_pipeline.stop()
             
         await self._orchestrator.stop()
+        self._memory.close()
         await self._brain.close()
 
         console.print()
@@ -305,7 +314,7 @@ class Assistant:
                     )
 
             # Log to context & state
-            self._context.add_exchange(
+            self._memory.log_interaction(
                 user_input,
                 str(result.output) if result.success else str(result.error),
                 intent=intent.intent,
@@ -321,7 +330,7 @@ class Assistant:
         # ── Conversational response ───────────────────
         if intent.response_text:
             # AI already generated a response
-            self._context.add_exchange(
+            self._memory.log_interaction(
                 user_input,
                 intent.response_text,
                 intent=intent.intent,
@@ -339,10 +348,10 @@ class Assistant:
         # ── AI Brain conversational fallback ──────────
         if self._brain.is_online:
             self._state.status = JarvisStatus.THINKING
-            context_str = self._context.build_prompt_context(max_exchanges=5)
+            context_str = self._memory.build_llm_context(user_input, max_short_exchanges=5)
             response = await self._brain.respond(user_input, context=context_str)
 
-            self._context.add_exchange(
+            self._memory.log_interaction(
                 user_input, response,
                 intent="conversation",
                 success=True,
@@ -356,7 +365,7 @@ class Assistant:
             )
 
         # ── Fully offline fallback ────────────────────
-        self._context.add_exchange(
+        self._memory.log_interaction(
             user_input,
             "(offline)",
             intent="unknown",
