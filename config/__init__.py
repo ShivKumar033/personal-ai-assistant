@@ -59,6 +59,17 @@ class SecurityConfig(BaseModel):
     risk_levels: dict[str, str] = Field(default_factory=dict)
 
 
+class SpeechConfig(BaseModel):
+    """Voice architecture processing parameters."""
+    enabled: bool = False
+    wake_word: str = "jarvis"
+    porcupine_access_key: str = ""
+    stt_engine: str = "whisper"
+    tts_engine: str = "edge-tts"
+    tts_voice: str = "en-GB-RyanNeural"
+    tts_rate: str = "+0%"
+
+
 class LoggingConfig(BaseModel):
     """Logging configuration."""
     level: str = "INFO"
@@ -92,6 +103,7 @@ class Settings(BaseModel):
     jarvis: JarvisConfig = Field(default_factory=JarvisConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    speech: SpeechConfig = Field(default_factory=SpeechConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     input: InputConfig = Field(default_factory=InputConfig)
     resources: ResourceConfig = Field(default_factory=ResourceConfig)
@@ -189,6 +201,7 @@ __all__ = [
     "JarvisConfig",
     "AIConfig",
     "SecurityConfig",
+    "SpeechConfig",
     "LoggingConfig",
     "InputConfig",
     "ResourceConfig",

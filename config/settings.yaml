@@ -61,6 +61,17 @@ security:
 
 # --- Logging ---
 logging:
+
+
+# --- Speech & Voice ---
+speech:
+  enabled: true
+  wake_word: "jarvis"
+  porcupine_access_key: ""    # Provide access key here if using Porcupine
+  stt_engine: "whisper"       # whisper | vosk
+  tts_engine: "edge-tts"      # edge-tts | pyttsx3
+  tts_voice: "en-GB-RyanNeural"
+  tts_rate: "+0%"
   level: "INFO"                # DEBUG | INFO | WARNING | ERROR | CRITICAL
   file: "logs/jarvis.log"
   rotation: "10 MB"

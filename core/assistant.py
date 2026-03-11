@@ -41,6 +41,10 @@ from ai.model_router import ModelRouter
 from ai.planner import AgentPlanner
 from ai.agent_executor import WorkflowRunner
 from core.task_orchestrator import TaskOrchestrator
+from modules.speech.wake_word_detector import WakeWordDetector
+from modules.speech.voice_listener import VoiceListener
+from modules.speech.tts_engine import TTSEngine
+from modules.speech.audio_stream import AudioStreamPipeline
 
 
 # ── Rich Console ──────────────────────────────────────────
@@ -91,6 +95,30 @@ class Assistant:
         self._workflow_runner = WorkflowRunner(self._brain, self._executor, self._state, self._planner)
         self._orchestrator = TaskOrchestrator(self._workflow_runner)
 
+        # ── Speech & Voice ─────────────────────────────
+        self._audio_pipeline = None
+        if getattr(settings, "speech", None) and settings.speech.enabled:
+            ww = WakeWordDetector(
+                access_key=settings.speech.porcupine_access_key,
+                keyword=settings.speech.wake_word,
+            )
+            vl = VoiceListener(engine=settings.speech.stt_engine)
+            tts = TTSEngine(
+                voice=settings.speech.tts_voice,
+                rate=settings.speech.tts_rate,
+            )
+            self._audio_pipeline = AudioStreamPipeline(
+                wake_word_detector=ww,
+                voice_listener=vl,
+                tts_engine=tts,
+                process_command_callback=self.process,
+                on_wake_callback=self._on_wake,
+            )
+            if self._audio_pipeline.initialize():
+                logger.info("Speech Pipeline loaded successfully.")
+            else:
+                self._audio_pipeline = None
+
         # Register built-in tools
         register_builtin_tools(self._registry)
 
@@ -135,6 +163,10 @@ class Assistant:
 
         # Start Task Orchestrator
         await self._orchestrator.start()
+        
+        # Start Speech Pipeline
+        if getattr(self, "_audio_pipeline", None):
+            await self._audio_pipeline.start()
 
         # Main REPL loop
         while self._running:
@@ -179,6 +211,9 @@ class Assistant:
         self._state.status = JarvisStatus.SHUTTING_DOWN
 
         # Close subsystems
+        if getattr(self, "_audio_pipeline", None):
+            await self._audio_pipeline.stop()
+            
         await self._orchestrator.stop()
         await self._brain.close()
 
@@ -194,6 +229,11 @@ class Assistant:
 
         await self._events.emit("jarvis_shutdown")
         logger.info("JARVIS shut down gracefully")
+
+    def _on_wake(self) -> None:
+        """Callback when wake word triggers."""
+        self._state.status = JarvisStatus.LISTENING
+        console.print("\n[bold cyan]🎙️ Wake word detected. Listening...[/bold cyan]")
 
     # ── Command Processing ────────────────────────────────
 
