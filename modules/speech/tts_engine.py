@@ -36,7 +36,7 @@ class TTSEngine:
         """Verify TTS engine initialization and dependencies."""
         # Check if python playsound or ffplay or aplay is installed for audio playback
         import shutil
-        players = ["paplay", "mpg123", "cvlc", "ffplay", "pw-play", "mpv", "play"]
+        players = ["paplay", "mpg123", "ffplay", "mpv", "cvlc", "pw-play", "play"]
 
 
         self.player = next((p for p in players if shutil.which(p)), None)

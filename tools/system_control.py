@@ -71,10 +71,11 @@ def register_system_tools(registry) -> None:
                 "method": "direct",
             }
 
-        # ── Strategy 2: Common name mappings ──────────
         app_aliases = {
             "firefox": ["firefox", "firefox-esr"],
             "chrome": ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
+            "brave": ["brave-browser", "brave"],
+            "edge": ["microsoft-edge", "microsoft-edge-stable"],
             "terminal": ["gnome-terminal", "xfce4-terminal", "konsole", "xterm", "kitty", "alacritty"],
             "files": ["nautilus", "thunar", "dolphin", "nemo", "pcmanfm"],
             "text editor": ["gedit", "kate", "mousepad", "xed", "nano"],
@@ -89,6 +90,7 @@ def register_system_tools(registry) -> None:
             "screenshot": ["gnome-screenshot", "flameshot", "spectacle"],
             "settings": ["gnome-control-center", "xfce4-settings-manager"],
         }
+
 
         candidates = app_aliases.get(app, [app])
 
@@ -531,8 +533,113 @@ def register_system_tools(registry) -> None:
                 }
 
             return {"status": "error", "error": f"Unsupported platform: {SYSTEM}"}
-
         except Exception as e:
             return {"status": "error", "error": str(e)}
+
+    # ═════════════════════════════════════════════════════════
+    #  Brightness Control
+    # ═════════════════════════════════════════════════════════
+
+    @registry.register(
+        name="set_brightness",
+        description="Set the screen brightness level (0-100)",
+        category="system",
+        risk_level="safe",
+        examples=["Set brightness to 50%", "Make the screen dimmer"],
+    )
+    async def set_brightness(level: int) -> dict:
+        """Set system brightness percentage."""
+        level = max(0, min(100, level))
+        try:
+            if SYSTEM == "linux":
+                if shutil.which("brightnessctl"):
+                    cmd = ["brightnessctl", "set", f"{level}%"]
+                elif shutil.which("xbacklight"):
+                    cmd = ["xbacklight", "-set", str(level)]
+                else:
+                    return {"status": "error", "error": "No brightness tool found (install brightnessctl)"}
+                
+                await asyncio.create_subprocess_exec(*cmd)
+                return {"status": "success", "level": level}
+            
+            return {"status": "error", "error": f"Brightness control not implemented for {SYSTEM}"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    # ═════════════════════════════════════════════════════════
+    #  Volume Control
+    # ═════════════════════════════════════════════════════════
+
+    @registry.register(
+        name="set_volume",
+        description="Set the system volume level (0-100)",
+        category="system",
+        risk_level="safe",
+        examples=["Set volume to 80%", "Mute the sound"],
+    )
+    async def set_volume(level: int) -> dict:
+        """Set system volume percentage."""
+        level = max(0, min(100, level))
+        try:
+            if SYSTEM == "linux":
+                # Try pactl (PulseAudio/Pipewire)
+                if shutil.which("pactl"):
+                    cmd = ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{level}%"]
+                elif shutil.which("amixer"):
+                    cmd = ["amixer", "set", "Master", f"{level}%"]
+                else:
+                    return {"status": "error", "error": "No volume tool found"}
+                
+                await asyncio.create_subprocess_exec(*cmd)
+                return {"status": "success", "level": level}
+            
+            return {"status": "error", "error": f"Volume control not implemented for {SYSTEM}"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    # ═════════════════════════════════════════════════════════
+    #  GUI / Screen Interaction (xdotool)
+    # ═════════════════════════════════════════════════════════
+
+    @registry.register(
+        name="gui_control",
+        description="Control the mouse and keyboard (Linux only)",
+        category="system",
+        risk_level="confirm",
+        examples=[
+            "Move mouse to 500 500",
+            "Click the mouse",
+            "Type 'Hello World'",
+            "Press the Enter key"
+        ],
+    )
+    async def gui_control(action: str, value: str = "", x: int = 0, y: int = 0) -> dict:
+        """
+        Interacts with the GUI using xdotool.
+        Actions: mousemove, click, type, key
+        """
+        if SYSTEM != "linux":
+            return {"status": "error", "error": "GUI control only available on Linux"}
+        
+        if not shutil.which("xdotool"):
+            return {"status": "error", "error": "xdotool not installed"}
+
+        try:
+            if action == "mousemove":
+                cmd = ["xdotool", "mousemove", str(x), str(y)]
+            elif action == "click":
+                cmd = ["xdotool", "click", "1"]  # Left click
+            elif action == "type":
+                cmd = ["xdotool", "type", value]
+            elif action == "key":
+                cmd = ["xdotool", "key", value]
+            else:
+                return {"status": "error", "error": f"Unknown action: {action}"}
+
+            await asyncio.create_subprocess_exec(*cmd)
+            return {"status": "success", "action": action}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
 
     logger.info(f"Registered system control tools (total: {registry.count})")

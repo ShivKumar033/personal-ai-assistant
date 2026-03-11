@@ -104,7 +104,10 @@ class Assistant:
                 access_key=settings.speech.porcupine_access_key,
                 keyword=settings.speech.wake_word,
             )
-            vl = VoiceListener(engine=settings.speech.stt_engine)
+            vl = VoiceListener(
+                engine=settings.speech.stt_engine,
+                energy_threshold=settings.speech.energy_threshold
+            )
             tts = TTSEngine(
                 voice=settings.speech.tts_voice,
                 rate=settings.speech.tts_rate,
@@ -124,6 +127,8 @@ class Assistant:
         register_builtin_tools(self._registry)
         register_memory_tools(self._registry, self._memory)
 
+        self._running = False
+        self._hands_free_announced = False
         logger.info("Assistant subsystems initialized")
 
     # ── Lifecycle ─────────────────────────────────────────
@@ -173,7 +178,12 @@ class Assistant:
         
         # Start Speech Pipeline
         if getattr(self, "_audio_pipeline", None):
-            await self._audio_pipeline.start()
+            # If hands-free is on and we DON'T have a wake word key, 
+            # the background loop is just wasting resources and causing potential mic conflicts (PortAudio).
+            if self._settings.speech.hands_free and not self._audio_pipeline.wake_detector.is_active:
+                logger.info("Hands-Free Mode active. Background wake-word detector disabled to prioritize direct listening.")
+            else:
+                await self._audio_pipeline.start()
 
         # Main REPL loop
         while self._running:
@@ -184,6 +194,15 @@ class Assistant:
                         console.print("[yellow] ⚠ Voice mode enabled but Speech Pipeline failed to start. Falling back to multi-mode.[/yellow]")
                         self._settings.input.mode = "both"
                     elif not self._audio_pipeline.wake_detector.is_active:
+                        if self._settings.speech.hands_free:
+                            # Continuous loop without wake-word
+                            if not self._hands_free_announced:
+                                console.print("\n[bold green]🎙️ Hands-Free Listening...[/bold green] (Say something or use Ctrl+C to stop)")
+                                self._hands_free_announced = True
+                            await self._audio_pipeline.trigger_once(silent=True)
+                            await asyncio.sleep(0.1) # Stabilization delay
+                            continue
+                        
                         # Falling back to "Press Enter to Talk" because no access key
                         console.print("\n[bold cyan]🎙️ Manual Trigger Mode (No Wake Word key detected).[/bold cyan]")
                         console.print("[dim]   Press Enter to speak your command, or type 'exit'[/dim]")

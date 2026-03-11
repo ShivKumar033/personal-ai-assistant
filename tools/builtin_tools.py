@@ -27,6 +27,16 @@ def register_builtin_tools(registry) -> None:
     from tools.system_control import register_system_tools
     from tools.file_manager import register_file_tools
     from modules.automation import register_automation_tools
+    from tools.hardware_tools import register_hardware_tools
+    from tools.network_tools import register_network_tools
+    from tools.web_tools import register_web_tools
+
+    register_system_tools(registry)
+    register_file_tools(registry)
+    register_automation_tools(registry)
+    register_hardware_tools(registry)
+    register_network_tools(registry)
+    register_web_tools(registry)
 
 
     # ── System Info ───────────────────────────────────────

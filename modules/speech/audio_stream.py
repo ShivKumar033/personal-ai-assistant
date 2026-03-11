@@ -79,13 +79,17 @@ class AudioStreamPipeline:
         self.wake_detector.close()
         logger.info("Background Voice Pipeline stopped.")
 
-    async def trigger_once(self) -> None:
+    async def trigger_once(self, silent: bool = False) -> None:
         """Manually trigger a single voice command capture."""
-        logger.info("Manual voice trigger activated.")
-        await self.tts.speak("Listening, sir.")
-        await self._handle_voice_command()
+        if not silent:
+            logger.info("Manual voice trigger activated.")
+            await self.tts.speak("Listening, sir.")
+        else:
+            logger.debug("Automatic hands-free trigger activated.")
+            
+        await self._handle_voice_command(silent=silent)
 
-    async def _handle_voice_command(self) -> None:
+    async def _handle_voice_command(self, silent: bool = False) -> None:
         """Handle capturing, transcribing, processing, and speaking a single command."""
         logger.info("Starting voice command capture...")
         command_text = await self.listener.listen_for_command()
@@ -102,7 +106,10 @@ class AudioStreamPipeline:
             except Exception as e:
                 logger.error(f"Error processing transcribed command: {e}")
         else:
-            await self.tts.speak("I didn't catch that.")
+            if not silent:
+                await self.tts.speak("I didn't catch that.")
+            else:
+                logger.debug("Hands-free cycle: No speech detected.")
 
     async def _audio_loop(self) -> None:
         """
@@ -137,43 +144,54 @@ class AudioStreamPipeline:
                 except asyncio.QueueFull:
                     pass
 
-            with sd.InputStream(
-                samplerate=sample_rate,
-                blocksize=frame_length,
-                dtype=np.int16,
-                channels=1,
-                callback=_callback,
-            ):
-                while self._is_running:
-                    # Skip frame processing if wake detector isn't initialized
-                    if not self.wake_detector.is_active:
-                        await asyncio.sleep(1)
-                        continue
+            while self._is_running:
+                # 1. Skip if wake detector isn't active
+                if not self.wake_detector.is_active:
+                    await asyncio.sleep(1)
+                    continue
 
-                    pcm_chunk = await q.get()
-                    
-                    # 1. Process Wake Word
-                    if self.wake_detector.process_frame(pcm_chunk):
-                        logger.info("Wake word detected!")
+                # 2. Only open stream if we actually have a wake word to detect
+                with sd.InputStream(
+                    samplerate=sample_rate,
+                    blocksize=frame_length,
+                    dtype=np.int16,
+                    channels=1,
+                    callback=_callback,
+                ):
+                    logger.debug("Sounddevice stream opened for wake word detection.")
+                    while self._is_running and self.wake_detector.is_active:
+                        pcm_chunk = await q.get()
                         
-                        # 2. Trigger on_wake callback
-                        if self.on_wake:
-                            if asyncio.iscoroutinefunction(self.on_wake):
-                                await self.on_wake()
-                            else:
-                                self.on_wake()
-                                
-                        # Play acknowledgement tone or TTS
-                        await self.tts.speak("Yes, sir?")
-                        
-                        # 3. Capture & Transcribe command using _handle_voice_command
-                        await self._handle_voice_command()
-                        
-                        # Flush the queue to prevent immediate re-triggering on stale audio
-                        while not q.empty():
-                            q.get_nowait()
+                        # Process Wake Word
+                        if self.wake_detector.process_frame(pcm_chunk):
+                            logger.info("Wake word detected!")
                             
-                        logger.info("Resuming wake word detection...")
+                            # Trigger on_wake callback
+                            if self.on_wake:
+                                if asyncio.iscoroutinefunction(self.on_wake):
+                                    await self.on_wake()
+                                else:
+                                    self.on_wake()
+                                    
+                            # Play acknowledgement tone or TTS
+                            await self.tts.speak("Yes, sir?")
+                            
+                            # Capture & Transcribe command
+                            # This will internally use sr.Microphone, so it MUST happen 
+                            # while the sounddevice InputStream is closed or at least idling.
+                            # Actually, sr.Microphone will crash if sd.InputStream is active on many systems.
+                            break # Exit the 'with' context to release the mic for STT
+                
+                # If we broke out due to WW detection, handle command here
+                if self._is_running and self.wake_detector.is_active:
+                    await self._handle_voice_command()
+                    # Flush the queue
+                    while not q.empty():
+                        try:
+                            q.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                    logger.info("Resuming wake word detection...")
 
         except asyncio.CancelledError:
             logger.debug("Audio loop cancelled.")

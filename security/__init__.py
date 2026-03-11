@@ -200,6 +200,13 @@ class PermissionEngine:
                     reason=f"Tool category '{category}' is blocked"
                 )
             elif level == RiskLevel.CONFIRM:
+                # Honor global confirmation override
+                if not self._confirmation_required:
+                    return PermissionResult(
+                        allowed=True,
+                        level=RiskLevel.SAFE,
+                        reason=f"Tool '{tool_name}' auto-approved (global confirmation disabled)"
+                    )
                 return PermissionResult(
                     allowed=True,
                     level=RiskLevel.CONFIRM,
@@ -212,6 +219,14 @@ class PermissionEngine:
                     level=RiskLevel.SAFE,
                     reason=f"Tool '{tool_name}' is safe to execute"
                 )
+
+        # Default fallback
+        if not self._confirmation_required:
+            return PermissionResult(
+                allowed=True,
+                level=RiskLevel.SAFE,
+                reason="Confirmation disabled — auto-approved"
+            )
 
         # Default to confirm for unknown tools
         return PermissionResult(

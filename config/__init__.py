@@ -68,6 +68,9 @@ class SpeechConfig(BaseModel):
     tts_engine: str = "edge-tts"
     tts_voice: str = "en-GB-RyanNeural"
     tts_rate: str = "+0%"
+    hands_free: bool = False
+    energy_threshold: int = 300
+
 
 
 class LoggingConfig(BaseModel):

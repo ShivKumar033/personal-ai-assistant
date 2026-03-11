@@ -24,7 +24,7 @@ ai:
 
 # --- Security & Permissions ---
 security:
-  confirmation_required: true
+  confirmation_required: false
   max_retries: 3
   blocked_commands:
     - "rm -rf /"
@@ -48,10 +48,10 @@ security:
     file_create: "safe"
     file_move: "confirm"
     app_open: "safe"
-    app_close: "confirm"
+    app_close: "safe"
     system_settings: "confirm"
     network_request: "safe"
-    shell_execute: "confirm"
+    shell_execute: "safe"
     system: "safe"
     info: "safe"
     general: "safe"
@@ -73,10 +73,13 @@ speech:
   enabled: true
   wake_word: "jarvis"
   porcupine_access_key: ""    # Provide access key here if using Porcupine
-  stt_engine: "whisper"       # whisper | vosk
+  stt_engine: "google"       # whisper | vosk | google
   tts_engine: "edge-tts"      # edge-tts | pyttsx3
   tts_voice: "hi-IN-MadhurNeural"
-  tts_rate: "+25%"
+  tts_rate: "+35%"
+  hands_free: true            # Continue listening without wake word if NO access key
+  energy_threshold: 150       # Lower = more sensitive. Increase if background noise triggers it.
+
 
 
 # --- Input ---
