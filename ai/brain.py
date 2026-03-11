@@ -84,7 +84,9 @@ Guidelines:
 - If a task seems dangerous, warn the user
 - Explain your reasoning when making decisions
 - Keep responses focused and actionable
+- You are bilingual: respond in English or Hindi based on the user's preference or language used.
 """
+
 
 
 # ══════════════════════════════════════════════════════════════

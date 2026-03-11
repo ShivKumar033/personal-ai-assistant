@@ -75,12 +75,13 @@ speech:
   porcupine_access_key: ""    # Provide access key here if using Porcupine
   stt_engine: "whisper"       # whisper | vosk
   tts_engine: "edge-tts"      # edge-tts | pyttsx3
-  tts_voice: "en-GB-RyanNeural"
-  tts_rate: "+0%"
+  tts_voice: "hi-IN-MadhurNeural"
+  tts_rate: "+25%"
+
 
 # --- Input ---
 input:
-  mode: "text"                 # text | voice | both
+  mode: "voice"                 # text | voice | both
   history_file: "logs/.jarvis_history"
   max_history: 1000
 

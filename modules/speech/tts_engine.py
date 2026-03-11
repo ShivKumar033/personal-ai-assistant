@@ -36,7 +36,9 @@ class TTSEngine:
         """Verify TTS engine initialization and dependencies."""
         # Check if python playsound or ffplay or aplay is installed for audio playback
         import shutil
-        players = ["ffplay", "mplayer", "mpv", "aplay", "afplay"]
+        players = ["paplay", "mpg123", "cvlc", "ffplay", "pw-play", "mpv", "play"]
+
+
         self.player = next((p for p in players if shutil.which(p)), None)
         
         if not self.player:
@@ -82,23 +84,36 @@ class TTSEngine:
             
             await communicate.save(temp_path)
             
+            if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                logger.debug(f"TTS audio file generated: {temp_path} ({os.path.getsize(temp_path)} bytes)")
+            else:
+                logger.error("TTS generation failed: Empty or missing file.")
+                return False
+
             # 2. Play audio file natively in a separate subprocess
             if self.player:
                 player_params = self._get_player_params(self.player, temp_path)
+                logger.debug(f"Executing audio player: {' '.join(player_params)}")
                 
                 proc = await asyncio.create_subprocess_exec(
                     *player_params,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
                 )
                 
-                await proc.wait()
+                stdout, stderr = await proc.communicate()
+                if proc.returncode != 0:
+                    logger.warning(f"Audio player {self.player} failed with code {proc.returncode}")
+                    if stderr:
+                        logger.debug(f"Player error output: {stderr.decode().strip()}")
                 return proc.returncode == 0
             
             return False
 
         except Exception as e:
             logger.error(f"TTS Engine failure: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return False
 
         finally:
@@ -112,14 +127,20 @@ class TTSEngine:
 
     def _get_player_params(self, player: str, file_path: str) -> list[str]:
         """Return the correct CLI args for the detected audio player."""
-        if player == "ffplay":
+        if player == "paplay":
+            return ["paplay", file_path]
+        elif player == "mpg123":
+            return ["mpg123", "-q", file_path]
+        elif player == "cvlc":
+            return ["cvlc", "--play-and-exit", "--quiet", file_path]
+        elif player == "pw-play":
+            return ["pw-play", file_path]
+        elif player == "ffplay":
             return ["ffplay", "-nodisp", "-autoexit", "-quiet", file_path]
         elif player == "mpv":
             return ["mpv", "--no-video", "--really-quiet", file_path]
-        elif player == "mplayer":
-            return ["mplayer", "-really-quiet", file_path]
-        elif player == "afplay":
-            return ["afplay", file_path]
+        elif player == "play":
+            return ["play", "-q", file_path]
         else:
             return [player, file_path]
 

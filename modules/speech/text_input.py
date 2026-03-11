@@ -99,11 +99,8 @@ class TextInput:
                 None, self._session.prompt
             )
             text = text.strip()
-
-            if not text:
-                return None
-
-            logger.debug(f"User input: '{text[:80]}...'")
+            if text:
+                logger.debug(f"User input: '{text[:80]}...'")
             return text
 
         except (EOFError, KeyboardInterrupt):

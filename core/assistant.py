@@ -116,10 +116,9 @@ class Assistant:
                 process_command_callback=self.process,
                 on_wake_callback=self._on_wake,
             )
-            if self._audio_pipeline.initialize():
-                logger.info("Speech Pipeline loaded successfully.")
-            else:
-                self._audio_pipeline = None
+            # Initialize speech components (mic, tts, etc.)
+            self._audio_pipeline.initialize()
+
 
         # Register built-in tools
         register_builtin_tools(self._registry)
@@ -179,12 +178,47 @@ class Assistant:
         # Main REPL loop
         while self._running:
             try:
+                # If in voice mode, we check if wake detector is active
+                if self._settings.input.mode == "voice":
+                    if not getattr(self, "_audio_pipeline", None):
+                        console.print("[yellow] ⚠ Voice mode enabled but Speech Pipeline failed to start. Falling back to multi-mode.[/yellow]")
+                        self._settings.input.mode = "both"
+                    elif not self._audio_pipeline.wake_detector.is_active:
+                        # Falling back to "Press Enter to Talk" because no access key
+                        console.print("\n[bold cyan]🎙️ Manual Trigger Mode (No Wake Word key detected).[/bold cyan]")
+                        console.print("[dim]   Press Enter to speak your command, or type 'exit'[/dim]")
+                        
+                        user_input = await self._text_input.get_input()
+                        
+                        # None means Ctrl+C or EOF
+                        if user_input is None or self._text_input.is_exit(user_input):
+                            await self.shutdown()
+                            break
+                        
+                        if user_input == "":
+                            # Trigger a single listen
+                            await self._audio_pipeline.trigger_once()
+                        else:
+                            # Process the text command directly
+                            response = await self.process(user_input)
+                            if response:
+                                await self._display_response(response)
+                        continue
+                    else:
+                        # Just idle and let the background audio pipeline handle commands
+                        await asyncio.sleep(1)
+                        continue
+
                 self._state.status = JarvisStatus.LISTENING
 
                 # Get user input
                 user_input = await self._text_input.get_input()
 
                 if user_input is None:
+                    await self.shutdown()
+                    break
+
+                if user_input == "":
                     continue
 
                 # Check for exit
@@ -198,7 +232,7 @@ class Assistant:
 
                 # Display response
                 if response:
-                    self._display_response(response)
+                    await self._display_response(response)
 
             except KeyboardInterrupt:
                 console.print("\n[dim]Interrupt received...[/dim]")
@@ -534,7 +568,7 @@ class Assistant:
         parts = [f"{k}={v}" for k, v in d.items()]
         return " | ".join(parts)
 
-    def _display_response(self, response: str) -> None:
+    async def _display_response(self, response: str) -> None:
         """Display a JARVIS response with rich formatting."""
         console.print()
         console.print(
@@ -546,6 +580,14 @@ class Assistant:
                 padding=(1, 2),
             )
         )
+
+        # Speak if speech is enabled
+        if self._audio_pipeline and self._audio_pipeline.tts:
+            logger.debug(f"Requesting TTS for: {response[:30]}...")
+            # We don't block the UI for speech
+            asyncio.create_task(self._audio_pipeline.tts.speak(response))
+        else:
+            logger.debug("Speech skipped: Audio pipeline or TTS not initialized.")
 
     # ── Boot Banner ───────────────────────────────────────
 

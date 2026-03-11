@@ -27,6 +27,11 @@ class WakeWordDetector:
         self.sensitivity = sensitivity
         self._porcupine: Optional[pvporcupine.Porcupine] = None
 
+    @property
+    def is_active(self) -> bool:
+        """Check if the Porcupine engine is successfully initialized."""
+        return self._porcupine is not None
+
     def initialize(self) -> bool:
         """Initialize the Porcupine engine."""
         if not self.access_key:

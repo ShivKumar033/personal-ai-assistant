@@ -44,12 +44,12 @@ class AudioStreamPipeline:
         vl_ok = self.listener.initialize()
         tts_ok = self.tts.initialize()
 
-        if not (ww_ok and vl_ok):
-            logger.error(
-                "Critical speech components failed to initialize. "
-                "Voice pipeline will not start."
-            )
+        if not vl_ok:
+            logger.error("Microphone (VoiceListener) failed to initialize. Voice pipeline will be disabled.")
             return False
+
+        if not ww_ok:
+            logger.warning("Wake Word Detector (Porcupine) failed (likely missing Access Key). Hands-free detection disabled.")
 
         if not tts_ok:
             logger.warning("TTS failed to initialize. JARVIS will be muted.")
@@ -78,6 +78,31 @@ class AudioStreamPipeline:
         
         self.wake_detector.close()
         logger.info("Background Voice Pipeline stopped.")
+
+    async def trigger_once(self) -> None:
+        """Manually trigger a single voice command capture."""
+        logger.info("Manual voice trigger activated.")
+        await self.tts.speak("Listening, sir.")
+        await self._handle_voice_command()
+
+    async def _handle_voice_command(self) -> None:
+        """Handle capturing, transcribing, processing, and speaking a single command."""
+        logger.info("Starting voice command capture...")
+        command_text = await self.listener.listen_for_command()
+        
+        if command_text:
+            try:
+                # Emit command to JARVIS orchestrator
+                response_text = await self.process_command(command_text)
+                
+                # Speak response
+                if response_text:
+                    await self.tts.speak(response_text)
+                    
+            except Exception as e:
+                logger.error(f"Error processing transcribed command: {e}")
+        else:
+            await self.tts.speak("I didn't catch that.")
 
     async def _audio_loop(self) -> None:
         """
@@ -120,6 +145,11 @@ class AudioStreamPipeline:
                 callback=_callback,
             ):
                 while self._is_running:
+                    # Skip frame processing if wake detector isn't initialized
+                    if not self.wake_detector.is_active:
+                        await asyncio.sleep(1)
+                        continue
+
                     pcm_chunk = await q.get()
                     
                     # 1. Process Wake Word
@@ -136,24 +166,8 @@ class AudioStreamPipeline:
                         # Play acknowledgement tone or TTS
                         await self.tts.speak("Yes, sir?")
                         
-                        # 3. Capture & Transcribe command using VoiceListener
-                        # This blocks the wake word detector temporarily while grabbing phrase
-                        logger.info("Starting voice command capture...")
-                        command_text = await self.listener.listen_for_command()
-                        
-                        if command_text:
-                            # 4. Pass to Assistant 
-                            try:
-                                response_text = await self.process_command(command_text)
-                                
-                                # 5. Speak response
-                                if response_text:
-                                    await self.tts.speak(response_text)
-                                    
-                            except Exception as e:
-                                logger.error(f"Error processing transcribed command: {e}")
-                        else:
-                            await self.tts.speak("I didn't catch that.")
+                        # 3. Capture & Transcribe command using _handle_voice_command
+                        await self._handle_voice_command()
                         
                         # Flush the queue to prevent immediate re-triggering on stale audio
                         while not q.empty():
